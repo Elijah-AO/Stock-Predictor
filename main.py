@@ -8,16 +8,31 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import numpy as np
 import os
+from tensorflow.keras import Model
+from tensorflow.keras import Sequential
+from tensorflow.keras.optimizers import Adam
+from sklearn.preprocessing import StandardScaler
+from tensorflow.keras.layers import Dense, Dropout
+from tensorflow.keras.losses import MeanSquaredLogarithmicError
+from tensorflow.keras.models import load_model
+from tensorflow.keras.saving import save_model
 class StockPredictor():
     def __init__(self, ticker, start='2000-01-01', end=datetime.today().strftime('%Y-%m-%d')):
         self.ticker = ticker
         self.start = start
         self.end = end 
+
     
     def download_data(self):
         data = yf.download(self.ticker, start=self.start, end=self.end)
         self.csv_path = f'{self.ticker}.csv'
         data.to_csv(self.csv_path)
+    
+    def load_model(self):
+        if f'{self.ticker}_model.keras' not in os.listdir():
+            self.train_network()
+        else:
+            self.model = load_model(f'{self.ticker}_model.keras')
 
     def load_data(self):
         if not f"{self.ticker}.csv" in os.listdir() :
@@ -26,7 +41,6 @@ class StockPredictor():
             
         df = pd.read_csv(f"{self.ticker}.csv")
         self.dates = df['Date']
-        print(df.head)
         df['Date'] = pd.to_datetime(df['Date'])
         X = df.drop(['Adj Close','Close', 'Date'], axis=1)
         y = df['Adj Close']
@@ -53,9 +67,53 @@ class StockPredictor():
         nrmse = rmse / np.mean(self.y_test) * 100  
         
         print(f'Error: {nrmse: .3f}%')
-    
+   
+    def scale(self):
+        standard_scaler = StandardScaler()
+        self.X_train = pd.DataFrame(
+        standard_scaler.fit_transform(self.X_train),
+        columns=self.X_train.columns
+        )   
+        
+        self.X_test = pd.DataFrame(
+        standard_scaler.transform(self.X_test),
+        columns = self.X_test.columns
+        ) 
+    def train_network(self):
+        self.scale()
+        hidden_units1 = 160
+        hidden_units2 = 480
+        hidden_units3 = 256
+        learning_rate = 0.001
+        self.model = Sequential([
+            Dense(hidden_units1, kernel_initializer='normal', activation='relu'),
+            Dropout(0.2),
+            Dense(hidden_units2, kernel_initializer='normal', activation='relu'),
+            Dropout(0.2),
+            Dense(hidden_units3, kernel_initializer='normal', activation='relu'),
+            Dense(1, kernel_initializer='normal', activation='linear')
+        ])
+        msle = MeanSquaredLogarithmicError()
+        self.model.compile(optimizer=Adam(learning_rate), loss='mean_squared_error', metrics=['mse'])
+        history = self.model.fit(self.X_train, self.y_train, epochs=100, batch_size=32, validation_split=0.2)
+        save_model(self.model, f'{self.ticker}_model.keras')
+        self.y_pred = self.model.predict(self.X_test)
+        mse = mean_squared_error(self.y_test, self.y_pred)
+        rmse = np.sqrt(mse)
+        nrmse = rmse / np.mean(self.y_test) * 100
+        print(f'Error: {nrmse:.3f}%')
+        key = 'mse'
+        plt.plot(history.history['mse'])
+        plt.plot(history.history['val_'+key])
+        plt.xlabel("Epochs")
+        plt.ylabel(key)
+        plt.legend([key, 'val_'+key])
+        plt.show()
+        
+        
         
     def plot_predictions(self):
+        self.y_pred = self.model.predict(self.X_test)
         plt.figure(figsize=(12, 6))
         plt.plot(self.dates_test, self.y_test, label='Actual')
         plt.plot(self.dates_test, self.y_pred, label='Predicted')
@@ -70,7 +128,7 @@ class StockPredictor():
 def main(ticker):
     predictor = StockPredictor(ticker)
     predictor.load_data()
-    predictor.train_regression()
+    predictor.train_network()
     predictor.plot_predictions()
 
 
