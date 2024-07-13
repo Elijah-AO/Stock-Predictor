@@ -11,42 +11,47 @@ import os
 from tensorflow.keras import Model
 from tensorflow.keras import Sequential
 from tensorflow.keras.optimizers import Adam
-from sklearn.preprocessing import StandardScaler
-from tensorflow.keras.layers import Dense, Dropout
+from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.losses import MeanSquaredLogarithmicError
 from tensorflow.keras.models import load_model
 from tensorflow.keras.saving import save_model
+from sklearn.preprocessing import MinMaxScaler
 class StockPredictor():
-    def __init__(self, ticker, start='2000-01-01', end=datetime.today().strftime('%Y-%m-%d')):
+    def __init__(self, ticker, start='2000-01-01', end=datetime.today().strftime('%Y-%m-%d'), model="LSTM"):
         self.ticker = ticker
         self.start = start
-        self.end = end 
+        self.end = end
+        self.model = "Regression"
+        self.model_path = f'models/{self.ticker}_{self.model}.keras'
+        self.csv_path = f'data/{self.ticker}.csv'
 
-    
-    def download_data(self):
-        data = yf.download(self.ticker, start=self.start, end=self.end)
-        self.csv_path = f'{self.ticker}.csv'
-        data.to_csv(self.csv_path)
-    
-    def load_model(self):
-        if f'{self.ticker}_model.keras' not in os.listdir():
-            self.train_network()
+
+    def get_data(self):
+        if not os.path.exists(self.csv_path):
+            print("Downloading ticker data")
+            data = yf.download(self.ticker, start=self.start, end=self.end)
+            data.to_csv(self.csv_path)
         else:
-            self.model = load_model(f'{self.ticker}_model.keras')
+            print("Retrieving data from CSV")
+        self.data = pd.read_csv(f"data/{self.ticker}.csv")
 
-    def load_data(self):
-        if not f"{self.ticker}.csv" in os.listdir() :
-            self.download_data()
-            print("downloadesd")
-            
-        df = pd.read_csv(f"{self.ticker}.csv")
+
+
+    def get_model(self):
+        if not os.path.exists(self.model_path):
+            self.train()
+        else:
+            self.model = load_model(f'{self.ticker}_{self.model}.keras')
+
+    def preprocessing(self, train_ratio=0.8):
+        df = self.data.copy()
         self.dates = df['Date']
         df['Date'] = pd.to_datetime(df['Date'])
-        X = df.drop(['Adj Close','Close', 'Date'], axis=1)
+        X = df.drop(['Adj Close', 'Date'], axis=1)
         y = df['Adj Close']
-        
-        train_size = int(len(df) * 0.8)
-        
+
+        train_size = int(len(df) * train_ratio)
+
         self.X_train = X.iloc[:train_size]
         self.X_test = X.iloc[train_size:]
         self.y_train = y.iloc[:train_size]
@@ -54,89 +59,56 @@ class StockPredictor():
 
         self.dates_train = self.dates.iloc[:train_size]
         self.dates_test = self.dates.iloc[train_size:]
-        
+
     def train_regression(self):
-        self.model = LinearRegression()
-        
-        self.model.fit(self.X_train, self.y_train)
-        
-        self.y_pred = self.model.predict(self.X_test)
-        
-        mse = mean_squared_error(self.y_test, self.y_pred)
-        rmse = np.sqrt(mse)
-        nrmse = rmse / np.mean(self.y_test) * 100  
-        
-        print(f'Error: {nrmse: .3f}%')
-   
-    def scale(self):
-        standard_scaler = StandardScaler()
-        self.X_train = pd.DataFrame(
-        standard_scaler.fit_transform(self.X_train),
-        columns=self.X_train.columns
-        )   
-        
-        self.X_test = pd.DataFrame(
-        standard_scaler.transform(self.X_test),
-        columns = self.X_test.columns
-        ) 
-    def train_network(self):
-        self.scale()
-        hidden_units1 = 160
-        hidden_units2 = 480
-        hidden_units3 = 256
-        learning_rate = 0.001
-        self.model = Sequential([
-            Dense(hidden_units1, kernel_initializer='normal', activation='relu'),
-            Dropout(0.2),
-            Dense(hidden_units2, kernel_initializer='normal', activation='relu'),
-            Dropout(0.2),
-            Dense(hidden_units3, kernel_initializer='normal', activation='relu'),
-            Dense(1, kernel_initializer='normal', activation='linear')
-        ])
-        msle = MeanSquaredLogarithmicError()
-        self.model.compile(optimizer=Adam(learning_rate), loss='mean_squared_error', metrics=['mse'])
-        history = self.model.fit(self.X_train, self.y_train, epochs=100, batch_size=32, validation_split=0.2)
-        save_model(self.model, f'{self.ticker}_model.keras')
-        self.y_pred = self.model.predict(self.X_test)
+        model = LinearRegression()
+
+        model.fit(self.X_train, self.y_train)
+
+        self.y_pred = model.predict(self.X_test)
+
         mse = mean_squared_error(self.y_test, self.y_pred)
         rmse = np.sqrt(mse)
         nrmse = rmse / np.mean(self.y_test) * 100
-        print(f'Error: {nrmse:.3f}%')
-        key = 'mse'
-        plt.plot(history.history['mse'])
-        plt.plot(history.history['val_'+key])
-        plt.xlabel("Epochs")
-        plt.ylabel(key)
-        plt.legend([key, 'val_'+key])
-        plt.show()
-        
-        
-        
-    def plot_predictions(self):
-        self.y_pred = self.model.predict(self.X_test)
-        plt.figure(figsize=(12, 6))
-        plt.plot(self.dates_test, self.y_test, label='Actual')
-        plt.plot(self.dates_test, self.y_pred, label='Predicted')
+
+        print(f'Error: {nrmse: .3f}%')
+
+    def train_lstm(self):
+        pass
+
+    def train(self):
+        match self.model:
+            case "LSTM":
+                self.train_lstm()
+            case "Regression":
+                self.train_regression()
+            case _:
+                raise ValueError("Invalid model")
+
+    def plot_data(self, predictions=False):
+        plt.xticks(range(0, len(self.data['Date']), 500), self.data['Date'].loc[::500], rotation=45)
+        plt.title(f'{self.ticker} Stock Price')
         plt.xlabel('Date')
-        plt.ylabel('Adjusted Close Price')
-        plt.title('Actual vs Predicted Adjusted Close Prices')
+        plt.ylabel('Price')
+        if predictions:
+            plt.plot(self.dates_test, self.y_test, label='Actual')
+            plt.plot(self.dates_test, self.y_pred, label='Predicted')
+
+        else:
+            plt.plot(self.data['Date'], self.data['Adj Close'])
+
         plt.legend()
-        plt.gca().xaxis.set_major_locator(mdates.MonthLocator(interval=3))
         plt.show()
-        
-        
+
+
 def main(ticker):
     predictor = StockPredictor(ticker)
-    predictor.load_data()
-    predictor.train_network()
-    predictor.plot_predictions()
-
+    predictor.get_data()
+    predictor.preprocessing()
+    predictor.train()
+    predictor.plot_data(predictions=True)
 
 if __name__ == "__main__":
-    '''parser = argparse.ArgumentParser(
-        prog='Stock Predictor',
-        description='Stock Predictor')
-    parser.add_argument('ticker', type=str, help='The ticker of the stock that you would like to predict')
-    args = parser.parse_args()
-    main(args.ticker)'''
-    main("NVDA")
+    main('AAPL')
+
+# TODO: MinMax Scaler vs standard scaler
