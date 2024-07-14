@@ -21,7 +21,7 @@ class StockPredictor():
         self.ticker = ticker
         self.start = start
         self.end = end
-        self.model = "Regression"
+        self.model = model
         self.model_path = f'models/{self.ticker}_{self.model}.keras'
         self.csv_path = f'data/{self.ticker}.csv'
 
@@ -60,12 +60,26 @@ class StockPredictor():
         self.dates_train = self.dates.iloc[:train_size]
         self.dates_test = self.dates.iloc[train_size:]
 
+        self.scaler_X = MinMaxScaler()
+        self.scaler_y = MinMaxScaler()
+
+        self.X_train = pd.DataFrame(self.scaler_X.fit_transform(self.X_train), columns=self.X_train.columns)
+        self.X_test = pd.DataFrame(self.scaler_X.transform(self.X_test), columns=self.X_test.columns)
+
+        self.y_train = pd.DataFrame(self.scaler_y.fit_transform(self.y_train.values.reshape(-1, 1)))
+
+        window = len(self.X_train // 5)
+
+
+
+
     def train_regression(self):
         model = LinearRegression()
-
         model.fit(self.X_train, self.y_train)
 
-        self.y_pred = model.predict(self.X_test)
+        self.y_pred_scaled = model.predict(self.X_test)
+
+        self.y_pred = self.scaler_y.inverse_transform(self.y_pred_scaled)
 
         mse = mean_squared_error(self.y_test, self.y_pred)
         rmse = np.sqrt(mse)
@@ -74,7 +88,36 @@ class StockPredictor():
         print(f'Error: {nrmse: .3f}%')
 
     def train_lstm(self):
-        pass
+        model = Sequential()
+        model.add(LSTM(100, return_sequences=True, input_shape=(5, 1)))
+        model.add(LSTM(100, return_sequences=False))
+        model.add(Dense(25))
+        model.add(Dense(1))
+
+        model.compile(optimizer='adam', loss='mean_squared_error')
+
+        X_train = np.array(self.X_train)
+        y_train = np.array(self.y_train)
+
+        X_train = np.reshape(X_train, (X_train.shape[0], X_train.shape[1], 1))
+
+        model.fit(X_train, y_train, batch_size=10, epochs=10)
+
+        save_model(model, f'models/{self.ticker}_{self.model}.keras')
+
+        X_test = np.array(self.X_test)
+        X_test = np.reshape(X_test, (X_test.shape[0], X_test.shape[1], 1))
+
+        self.y_pred_scaled = model.predict(X_test)
+
+        self.y_pred = self.scaler_y.inverse_transform(self.y_pred_scaled)
+
+        mse = mean_squared_error(self.y_test, self.y_pred)
+        rmse = np.sqrt(mse)
+        nrmse = rmse / np.mean(self.y_test) * 100
+
+        print(f'Error: {nrmse: .3f}%')
+
 
     def train(self):
         match self.model:
@@ -100,15 +143,25 @@ class StockPredictor():
         plt.legend()
         plt.show()
 
+    def pl(self):
+            plt.figure(figsize=(12, 6))
+            plt.plot(self.dates_test, self.y_test, label='Actual')
+            plt.plot(self.dates_test, self.y_pred, label='Predicted')
+            plt.xlabel('Date')
+            plt.ylabel('Adjusted Close Price')
+            plt.title('Actual vs Predicted Adjusted Close Prices')
+            plt.legend()
+            plt.gca().xaxis.set_major_locator(mdates.MonthLocator(interval=len(self.dates_test) // 200))
+            plt.show()
+
 
 def main(ticker):
     predictor = StockPredictor(ticker)
     predictor.get_data()
     predictor.preprocessing()
     predictor.train()
-    predictor.plot_data(predictions=True)
+    predictor.pl()
+
 
 if __name__ == "__main__":
-    main('AAPL')
-
-# TODO: MinMax Scaler vs standard scaler
+    main('NVDA')
